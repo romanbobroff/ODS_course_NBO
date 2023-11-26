@@ -24,9 +24,10 @@ class Collaborative:
         train[f'{self.target}_le'] = le_item.fit_transform(train[self.target]).astype(np.int32)
 
         le_session_train = LabelEncoder()
+        train['rating'] = 1
         train['user_id_le'] = le_session_train.fit_transform(train['user_id']).astype(np.int32)
         df_train = sparse.csr_matrix(
-            (list(np.ones(len(train))), (list(train['user_id_le']), list(train[f'{self.target}_le'])))
+            (list(train['rating'] + 0.01), (list(train['user_id_le']), list(train[f'{self.target}_le'])))
         )
 
         self.model.fit(df_train.astype(np.float32), show_progress=False)
@@ -49,18 +50,19 @@ class Collaborative:
         predictions = pd.DataFrame(np.vstack(predictions), columns=['user_id_le', f'{self.target}_le', 'score'])
         return predictions[predictions['score'] > 0]
 
-    def predict(self, train):
-        if f'{self.target}_le' in train:
-            train = train.drop(columns=f'{self.target}_le')
+    def predict(self, test):
+        if f'{self.target}_le' in test:
+            test = test.drop(columns=f'{self.target}_le')
         le_user = LabelEncoder()
-        train['user_id_le'] = le_user.fit_transform(train['user_id']).astype(np.int32)
-        train = train.merge(self.item_encoding, on=self.target, how='inner')
+        test['user_id_le'] = le_user.fit_transform(test['user_id']).astype(np.int32)
+        test = test.merge(self.item_encoding, on=self.target, how='inner')
+        test['rating'] = 1
         df_test = sparse.csr_matrix(
-            (list(np.ones(len(train))), (list(train['user_id_le']), list(train[f'{self.target}_le']))),
-            shape=(train['user_id_le'].max() + 1, self.item_encoding[f'{self.target}_le'].max() + 1),
+            (list(test['rating'] + 0.01), (list(test['user_id_le']), list(test[f'{self.target}_le']))),
+            shape=(test['user_id_le'].max() + 1, self.item_encoding[f'{self.target}_le'].max() + 1),
         )
 
-        test_users = le_user.transform(list(set(train['user_id'])))
+        test_users = le_user.transform(list(set(test['user_id'])))
         candidates = self._predict_users(self.model, df_test, test_users)
         candidates['user_id'] = le_user.inverse_transform(candidates['user_id_le'].astype(np.int32))
         candidates = candidates.merge(self.item_encoding, on=f'{self.target}_le', how='inner')

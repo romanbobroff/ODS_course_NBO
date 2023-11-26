@@ -10,14 +10,12 @@ class TopPopular:
 
     def fit(self, train_sessions):
         grouping = train_sessions.groupby(self.target).count()[self.user_key].reset_index()
-        print (grouping)
         self.recs = (
             grouping.sort_values([self.user_key], ascending=False)[self.target]
             .reset_index(drop=True)
             .iloc[0 : self.k_top]
             .to_frame()
         )
-        print (self.recs)
     
     def predict(self, test_users):
         recs = list(self.recs[self.target].unique())
