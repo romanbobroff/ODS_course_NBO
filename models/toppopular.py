@@ -8,8 +8,8 @@ class TopPopular:
         self.user_key = user_key
         self.k_top = k_top
 
-    def fit(self, train_sessions):
-        grouping = train_sessions.groupby(self.target).count()[self.user_key].reset_index()
+    def fit(self, train):
+        grouping = train.groupby(self.target).count()[self.user_key].reset_index()
         self.recs = (
             grouping.sort_values([self.user_key], ascending=False)[self.target]
             .reset_index(drop=True)
@@ -31,9 +31,9 @@ class TopPopular:
         predicted['score'] = 1 / predicted['rnk']
         return predicted
     
-    def fit_predict(self, train_sessions, test_sessions):
-        test_users = test_sessions['user_id'].unique()
-        self.fit(train_sessions)
+    def fit_predict(self, train, test):
+        test_users = test['user_id'].unique()
+        self.fit(train)
         return self.predict(test_users)
 
 
@@ -43,8 +43,8 @@ class UserTopPopular:
         self.user_key = user_key
         self.k_top = k_top
 
-    def fit(self, train_sessions):
-        self.recs = train_sessions.groupby([self.user_key, self.target]).size().reset_index(name='cnt')
+    def fit(self, train):
+        self.recs = train.groupby([self.user_key, self.target]).size().reset_index(name='cnt')
         self.recs['rnk'] = self.recs.groupby(self.user_key)['cnt'].rank(method='dense', ascending=False)
         self.recs = self.recs.drop(columns='cnt')
     
@@ -53,7 +53,7 @@ class UserTopPopular:
         predicted['score'] = 1 / predicted['rnk']
         return predicted
     
-    def fit_predict(self, train_sessions, test_sessions):
-        test_users = test_sessions['user_id'].unique()
-        self.fit(train_sessions)
+    def fit_predict(self, train, test):
+        test_users = test['user_id'].unique()
+        self.fit(train)
         return self.predict(test_users)

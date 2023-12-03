@@ -78,8 +78,8 @@ def boosting_pipeline(k_top, target, model_names, test_months_collab=2, test_mon
             candidates = Collaborative(target=target, k_top=k_top, model_name='bm25').fit_predict(generator_train_data)
             candidates_test = Collaborative(target=target, k_top=k_top, model_name='bm25').fit_predict(train)
         elif model_name == 'markov':
-            candidates = MarkovChain(target=target).fit_predict(generator_train_data, generator_test_data, k_top=k_top, shrink=False)
-            candidates_test = MarkovChain(target=target).fit_predict(train, test, k_top=k_top, shrink=False)
+            candidates = MarkovChain(target=target).fit_predict(generator_train_data, generator_test_data, k_top=k_top, shrink=True)
+            candidates_test = MarkovChain(target=target).fit_predict(train, test, k_top=k_top, shrink=True)
         elif model_name == 'toppop':
             candidates = TopPopular(k_top=k_top, target=target).fit_predict(generator_train_data, generator_test_data)
             candidates_test = TopPopular(k_top=k_top, target=target).fit_predict(train, test)
@@ -88,14 +88,10 @@ def boosting_pipeline(k_top, target, model_names, test_months_collab=2, test_mon
             candidates_test = UserTopPopular(k_top=k_top, target=target).fit_predict(train, test)
         elif model_name == 'apriori':
             candidates = pd.read_parquet(f'apriori_output/target_{target}_{test_months_global}.par')
-            candidates = candidates.rename(columns={'item_next': target})
-            candidates = candidates.dropna(subset=[target])
             candidates = candidates[candidates['rnk'] <= k_top]
             candidates_test = candidates
         elif model_name == 'apriori_lastnext':
             candidates = pd.read_parquet(f'apriori_output/target_{target}_lastnext_{test_months_global}.par')
-            candidates = candidates.rename(columns={'item_next': target})
-            candidates = candidates.dropna(subset=[target])
             candidates = candidates[candidates['rnk'] <= k_top]
             candidates_test = candidates
 

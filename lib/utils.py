@@ -5,6 +5,7 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.utils import shuffle
 from scipy import sparse
 from functools import reduce
+import json
 
 from models.boosting import Boosting
 
@@ -37,7 +38,6 @@ user_features = [
     'check_av_quintity',
     'check_av_item', 
     'frequence_client_per_month',
-    'ltv_quantity_cumul',
     'monetary',
     'frequency',
     'elasticity_client',
@@ -155,47 +155,31 @@ def union_candidates(predictions, target):
 
     return candidates
 
-def calc_metrics(test_sessions, predicted, target='item_id', rnk_col='rnk', score_col='score', use_clusters=False):
+def calc_metrics(test, predicted, target='item_id', rnk_col='rnk', score_col='score', use_clusters=False):
     metrics = {}
     cluster_metrics = []
+
     for k in [1, 5, 10, 20]:
         predicted_topk = predicted[predicted[rnk_col] <= int(k)][['user_id', target, rnk_col]]
-        merged = pd.merge(test_sessions, predicted_topk, on=['user_id', target], how='left')
-        
-        # # recall@k
-        # metrics[f'recall@{k}'] = sum(merged[rnk_col].notna()) / len(merged)
+        merged = pd.merge(test, predicted_topk, on=['user_id', target], how='left')
 
-        # recall@k_users
         merged['users_item_count'] = merged['user_id'].map(merged.groupby('user_id').size())
         merged['users_hits_count'] = merged['user_id'].map(merged[merged[rnk_col].notna()].groupby('user_id').size())
+        
+        # recall@k
         merged['recall_user'] = merged['users_hits_count'] / merged['users_item_count']
         merged['recall_user'].fillna(0, inplace=True)
-        metrics[f'recall@{k}'] = merged.drop_duplicates(subset='user_id')['recall_user'].mean()
+        metrics[f'recall@{str(k).zfill(2)}'] = merged.drop_duplicates(subset='user_id')['recall_user'].mean()
 
-        # # users_hitted@k
-        # metrics[f'users_hitted@{k}'] = merged[merged['users_hits_count'].notna()]['user_id'].nunique() / merged['user_id'].nunique()
+        # precision@k
+        merged['precision_user'] = merged['users_hits_count'] / k
+        merged['precision_user'].fillna(0, inplace=True)
+        metrics[f'precision@{str(k).zfill(2)}'] = merged.drop_duplicates(subset='user_id')['precision_user'].mean()
 
-        # if use_clusters:
-        #     merged['clusters_item_count'] = merged[cluster_features[0]].map(merged.groupby(cluster_features[0]).size())
-        #     merged['clusters_hits_count'] = merged[cluster_features[0]].map(merged[merged[rnk_col].notna()].groupby(cluster_features[0]).size())
-        #     merged[f'recall@{k}_cluster'] = merged['clusters_hits_count'] / merged['clusters_item_count']
-        #     merged[f'recall@{k}_cluster'].fillna(0, inplace=True)
-
-        #     cluster_metrics.append(merged.drop_duplicates(subset=[cluster_features[0]])[[cluster_features[0], f'recall@{k}_cluster']])
-
-    print (metrics)
-    if use_clusters and (cluster_features[0] is not None):
-        cluster_metrics = cluster_metrics[0].merge(cluster_metrics[1], on=cluster_features[0], how='left')\
-            .merge(cluster_metrics[2], on=cluster_features[0], how='left')\
-            .merge(cluster_metrics[3], on=cluster_features[0], how='left')
-        # print (cluster_metrics)
-
-    # if rnk_col == 'boosting_rnk':
-    #     for k in [0.5, 0.7, 0.9]:
-    #         hit_k = f'hit@{k}'
-    #         df_merged[hit_k] = df_merged[score_col] >= k
-    #         metrics[f'recall@{k}'] = (df_merged[hit_k] / df_merged['users_item_count']).sum() / df_merged['user_id'].nunique()
-    #     print (metrics)
+        # users_hitted@k
+        metrics[f'user_hitted@{str(k).zfill(2)}'] = merged[merged['users_hits_count'].notna()]['user_id'].nunique() / merged['user_id'].nunique()
+    
+    print (json.dumps(metrics, sort_keys=True, indent=4))
 
     return metrics, cluster_metrics
 
@@ -253,6 +237,57 @@ def predict_boosting(model, df_test, candidates_test, target):
     predicted['boosting_score'] = boosting_predictions[:, 1]
     predicted['boosting_rnk'] = predicted.groupby('user_id')['boosting_score'].rank(ascending=False)
     return predicted
+
+#--------------------------------------------------------
+# Merge item and catetory predictions, calculate metrics
+#--------------------------------------------------------
+def merge_item_cat_preds(predicted_item, predicted_cat, test, items):
+    predicted_cat = predicted_cat.drop_duplicates(subset=['user_id', 'category_id'])
+
+    test = test[['user_id', 'item_id', 'category_id']]
+
+    items = items.rename(columns={'item': 'item_id'})[['item_id', 'description']].drop_duplicates()
+    predicted_item = predicted_item.merge(items, on='item_id', how='left')
+    predicted_item['is_item']  = 1
+    predicted_cat['is_cat'] = 1
+
+    cols = ['user_id', 'item_id', 'category_id', 'description', 'boosting_score', 'boosting_rnk', 'is_item', 'is_cat']
+    predicted_merge = pd.concat((predicted_item, predicted_cat), axis=0)[cols]
+    predicted_merge['merge_rnk'] = predicted_merge.groupby('user_id')['boosting_score'].rank(method='dense', ascending=False)
+    predicted_merge['target'] = predicted_merge['item_id'].fillna(predicted_merge['category_id'])
+
+    return predicted_merge
+
+def calc_merged_metrics(predicted_merge, test, items):
+    items = items.rename(columns={'item': 'item_id'})[['item_id', 'description']].drop_duplicates()
+
+    test = test.merge(items, on='item_id', how='left')
+
+    test = test.merge(
+        predicted_merge[['user_id', 'item_id', 'is_item', 'boosting_rnk']], 
+        on=['user_id', 'item_id'], how='left',
+    )
+    test = test.merge(
+        predicted_merge[['user_id', 'category_id', 'is_cat', 'boosting_rnk']], 
+        on=['user_id', 'category_id'], how='left',
+    )
+
+    test['boosting_rnk'] = test['boosting_rnk_x'].fillna(test['boosting_rnk_y'])
+
+    test.loc[(test['is_item'] == 1) | (test['is_cat'] == 1), 'is_hit'] = 1
+
+    metrics = {}
+    for k in [1, 5, 10, 20]:
+        predicted_topk = test[test['boosting_rnk'] <= k]
+
+        # recall@k
+        metrics[f'recall@{str(k).zfill(2)}'] = (predicted_topk.groupby('user_id')['is_hit'].sum() / test.groupby('user_id').size()).mean()
+
+        # metrics[f'precision@{str(k).zfill(2)}'] = (predicted_topk.groupby('user_id')['is_hit'].sum() / k).mean()
+
+        # metrics[f'user_hitted@{str(k).zfill(2)}'] = predicted_topk[predicted_topk['users_hits_count'].notna()]['user_id'].nunique() / merged['user_id'].nunique()
+
+    print (json.dumps(metrics, sort_keys=True, indent=4))
 
 #--------------------------------------------------------
 # Clustering

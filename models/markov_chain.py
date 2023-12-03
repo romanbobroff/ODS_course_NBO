@@ -8,25 +8,25 @@ from tqdm import tqdm
 
 class MarkovChain:
     def __init__(self, target='item_id'):
-        self.target_col = target
-        self.target_cols = [self.target_col[:-3] + '1_id', self.target_col[:-3] + '2_id']
+        self.target = target
+        self.targets = [self.target[:-3] + '1_id', self.target[:-3] + '2_id']
 
-    def fit(self, train_sessions: pd.DataFrame):
-        self._make_item_pair_in_sessions(train_sessions)
+    def fit(self, train: pd.DataFrame):
+        self._make_consequent_item_pairs(train)
 
-        i2i_transitions_num = self.df_sales_pair.groupby(self.target_cols).size().reset_index(name='i2i_transitions_num')
-        self.df_sales_pair = self.df_sales_pair.merge(i2i_transitions_num, on=self.target_cols, how='left').drop_duplicates()
+        i2i_transitions_num = self.pairs.groupby(self.targets).size().reset_index(name='i2i_transitions_num')
+        self.pairs = self.pairs.merge(i2i_transitions_num, on=self.targets, how='left').drop_duplicates()
 
         self.le_item = LabelEncoder()
-        train_items = list(set(self.df_sales_pair[self.target_cols[0]]) | set(self.df_sales_pair[self.target_cols[1]]))
+        train_items = list(set(self.pairs[self.targets[0]]) | set(self.pairs[self.targets[1]]))
         self.n_items = len(train_items)
         self.le_item.fit(train_items)
-        self.df_sales_pair[self.target_cols[0] + '_le'] = self.le_item.transform(self.df_sales_pair[self.target_cols[0]])
-        self.df_sales_pair[self.target_cols[1] + '_le'] = self.le_item.transform(self.df_sales_pair[self.target_cols[1]])
+        self.pairs[self.targets[0] + '_le'] = self.le_item.transform(self.pairs[self.targets[0]])
+        self.pairs[self.targets[1] + '_le'] = self.le_item.transform(self.pairs[self.targets[1]])
 
         self.observed_matrix = np.array(sparse.csr_matrix(
-            (list(self.df_sales_pair['i2i_transitions_num']), 
-            (list(self.df_sales_pair[self.target_cols[0] + '_le']), list(self.df_sales_pair[self.target_cols[1] + '_le']))),
+            (list(self.pairs['i2i_transitions_num']), 
+            (list(self.pairs[self.targets[0] + '_le']), list(self.pairs[self.targets[1] + '_le']))),
             shape=(self.n_items, self.n_items),
         ).todense())
 
@@ -41,24 +41,24 @@ class MarkovChain:
 
         return self.observed_matrix, self.observed_p_matrix
 
-    def _make_item_pair_in_sessions(self, events):
+    def _make_consequent_item_pairs(self, events):
         events['date_rnk'] = events.groupby('user_id')['purch_date'].rank(ascending=True)
 
-        cols = ['user_id', self.target_col, 'date_rnk']
+        cols = ['user_id', self.target, 'date_rnk']
         events = events[cols]
-        self.df_sales_pair = pd.merge(events, events, on='user_id')
+        self.pairs = pd.merge(events, events, on='user_id')
 
-        cond1 = self.df_sales_pair[self.target_col + '_x'] != self.df_sales_pair[self.target_col + '_y']
-        cond2 = self.df_sales_pair['date_rnk_y'] - self.df_sales_pair['date_rnk_x'] == 1
-        self.df_sales_pair = self.df_sales_pair[cond1 & cond2]
+        cond1 = self.pairs[self.target + '_x'] != self.pairs[self.target + '_y']
+        cond2 = self.pairs['date_rnk_y'] - self.pairs['date_rnk_x'] == 1
+        self.pairs = self.pairs[cond1 & cond2]
 
-        self.df_sales_pair = self.df_sales_pair.rename(columns={
-            self.target_col + '_x': self.target_cols[0],
-            self.target_col + '_y': self.target_cols[1],
+        self.pairs = self.pairs.rename(columns={
+            self.target + '_x': self.targets[0],
+            self.target + '_y': self.targets[1],
             'user_id_x': 'user_id',
         })
             
-        self.df_sales_pair = self.df_sales_pair[['user_id', *self.target_cols]]
+        self.pairs = self.pairs[['user_id', *self.targets]]
 
     def simulate(self, topk: int, start=None, seed=None):
         tf = self.observed_matrix
@@ -87,7 +87,7 @@ class MarkovChain:
             seq[i] = _sample
 
         preds = self.le_item.inverse_transform(seq)
-        return pd.DataFrame({self.target_col: preds, 'rnk': np.arange(1, len(preds) + 1)})
+        return pd.DataFrame({self.target: preds, 'rnk': np.arange(1, len(preds) + 1)})
 
     def _predict_user(self, user_id, user_items, topk):
         user_items = list(set(user_items) & set(self.le_item.classes_))
@@ -98,33 +98,33 @@ class MarkovChain:
         scores = scores[ids]
         predicted_items = np.arange(self.n_items)[ids]
         predicted_items = self.le_item.inverse_transform(predicted_items)
-        predicted = pd.DataFrame({'user_id': [user_id] * len(scores), self.target_col: predicted_items, 'score': scores})
+        predicted = pd.DataFrame({'user_id': [user_id] * len(scores), self.target: predicted_items, 'score': scores})
         predicted['rnk'] = predicted.groupby('user_id')['score'].rank(method='dense', ascending=False)
         predicted = predicted[predicted['rnk'] <= topk]
         return predicted
     
-    def predict_users(self, train_sessions, test_users, k_top):
+    def predict_users(self, train, test_users, k_top):
         predicted = []
         for user_id in tqdm(test_users):
-            user_items = train_sessions[train_sessions['user_id'] == user_id][self.target_col].unique()
+            user_items = train[train['user_id'] == user_id][self.target].unique()
             preds = self._predict_user(user_id, user_items, k_top)
             predicted.append(preds)
 
         return pd.concat(predicted, axis=0)
 
-    def predict(self, train_sessions, test_users, k_top, shrink=True):
-        test_p = train_sessions.copy()
+    def predict(self, train, test_users, k_top, shrink=True):
+        test_p = train.copy()
         test_p = test_p[test_p['user_id'].isin(test_users)]
-        test_items = list(set(test_p[self.target_col]) & set(self.le_item.classes_))
-        test_p = test_p[test_p[self.target_col].isin(test_items)]
-        test_p[self.target_col + '_le'] = self.le_item.transform(test_p[self.target_col])
+        test_items = list(set(test_p[self.target]) & set(self.le_item.classes_))
+        test_p = test_p[test_p[self.target].isin(test_items)]
+        test_p[self.target + '_le'] = self.le_item.transform(test_p[self.target])
         test_p['rating'] = 1
         le_user = LabelEncoder()
         test_p['user_id_le'] = le_user.fit_transform(test_p['user_id'])
 
         user_item_matrix = np.array(sparse.csr_matrix(
             (list(test_p['rating'] + 0.01), 
-            (list(test_p['user_id_le']), list(test_p[self.target_col + '_le']))),
+            (list(test_p['user_id_le']), list(test_p[self.target + '_le']))),
             shape=(test_p['user_id_le'].max() + 1, self.n_items),
         ).todense())
 
@@ -134,7 +134,7 @@ class MarkovChain:
         users = np.array([[user_id] * predicted.shape[1] for user_id in test_users]).reshape(1, -1)[0]
         items = np.array([self.le_item.inverse_transform(np.arange(self.n_items))] * len(test_users)).reshape(1, -1)[0]
         scores = predicted.reshape(1, -1)[0]
-        predicted = pd.DataFrame({'user_id': users, self.target_col: items, 'score': scores})
+        predicted = pd.DataFrame({'user_id': users, self.target: items, 'score': scores})
 
         predicted = predicted[predicted['score'] > 0]
         predicted['rnk'] = predicted.groupby('user_id')['score'].rank(method='dense', ascending=False)
@@ -149,9 +149,9 @@ class MarkovChain:
             predicted = predicted.merge(rnk_size_cumsum_last, on=['user_id', 'rnk'], how='left')
             predicted = predicted[predicted['rnk_size_cumsum_last'] <= k_top]
 
-        return predicted[['user_id', self.target_col, 'score', 'rnk']]
+        return predicted[['user_id', self.target, 'score', 'rnk']]
 
-    def fit_predict(self, train_sessions, test_sessions, k_top, shrink=True):
-        test_users = test_sessions['user_id'].unique()
-        self.fit(train_sessions)
-        return self.predict(train_sessions, test_users, k_top, shrink=shrink)
+    def fit_predict(self, train, test, k_top, shrink=True):
+        test_users = test['user_id'].unique()
+        self.fit(train)
+        return self.predict(train, test_users, k_top, shrink=shrink)
