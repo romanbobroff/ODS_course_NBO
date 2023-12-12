@@ -13,7 +13,7 @@ from lib.durations import predict_durations
 
 
 def toppopular_pipeline(k_top, target, model_name, test_months):
-    sessions = pd.read_pickle('data/transaction_and_features_2.pkl')
+    sessions = pd.read_pickle('../data/transaction_and_features_2.pkl')
     sessions, _, _, _ = preprocessing(sessions)
 
     train, test = train_test_split(sessions, test_months=test_months)
@@ -30,7 +30,7 @@ def toppopular_pipeline(k_top, target, model_name, test_months):
     return candidates, predicted_durs
 
 def collab_pipeline(k_top, target, model_name, test_months):
-    sessions = pd.read_pickle('data/transaction_and_features_2.pkl')
+    sessions = pd.read_pickle('../data/transaction_and_features_2.pkl')
     sessions, _, _, _ = preprocessing(sessions)
 
     train, test = train_test_split(sessions, test_months=test_months)
@@ -44,7 +44,7 @@ def collab_pipeline(k_top, target, model_name, test_months):
     return candidates, predicted_durs
 
 def markov_pipeline(k_top, target, test_months=2, shrink=True):
-    sessions = pd.read_pickle('data/transaction_and_features_2.pkl')
+    sessions = pd.read_pickle('../data/transaction_and_features_2.pkl')
     sessions, _, _, _ = preprocessing(sessions)
 
     train, test = train_test_split(sessions, test_months=test_months)
@@ -58,7 +58,7 @@ def markov_pipeline(k_top, target, test_months=2, shrink=True):
     return candidates, predicted_durs
 
 def boosting_pipeline(k_top, target, model_names, test_months_collab=2, test_months_global=2):
-    sessions = pd.read_pickle('data/transaction_and_features_2.pkl')
+    sessions = pd.read_pickle('../data/transaction_and_features_2.pkl')
     sessions, items, users, _ = preprocessing(sessions)
 
     train, test = train_test_split(sessions, test_months=test_months_global)
