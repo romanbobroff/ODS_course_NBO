@@ -1,6 +1,8 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
+import sys
+sys.path.append('..')
 
 from lib.utils import preprocessing, train_test_split, union_candidates, \
     label_candidates, add_features, fit_boosting, predict_boosting, calc_metrics
