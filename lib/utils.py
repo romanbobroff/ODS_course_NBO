@@ -6,6 +6,9 @@ from sklearn.utils import shuffle
 from scipy import sparse
 from functools import reduce
 import json
+import sys
+
+sys.path.append('..')
 
 from models.boosting import Boosting
 
